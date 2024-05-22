@@ -1,8 +1,8 @@
 /*
  * This file is part of the Xilinx DMA IP Core driver for Linux
  *
- * Copyright (c) 2017-2020,  Xilinx, Inc.
- * All rights reserved.
+ * Copyright (c) 2017-2022, Xilinx, Inc. All rights reserved.
+ * Copyright (c) 2022-2023, Advanced Micro Devices, Inc. All rights reserved.
  *
  * This source code is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -133,10 +133,22 @@ static int qdma_req_completed(struct qdma_request *req,
 	if (caio->cmpl_count == caio->req_count) {
 		res = caio->cmpl_count - caio->err_cnt;
 		res2 = caio->res2;
-#if KERNEL_VERSION(4, 1, 0) <= LINUX_VERSION_CODE
+#ifdef RHEL_RELEASE_VERSION
+#if RHEL_RELEASE_VERSION(9, 0) < RHEL_RELEASE_CODE
+		caio->iocb->ki_complete(caio->iocb, res);
+#elif RHEL_RELEASE_VERSION(8, 0) < RHEL_RELEASE_CODE
 		caio->iocb->ki_complete(caio->iocb, res, res2);
 #else
 		aio_complete(caio->iocb, res, res2);
+#endif
+#else
+#if KERNEL_VERSION(5, 16, 0) <= LINUX_VERSION_CODE
+		caio->iocb->ki_complete(caio->iocb, res);
+#elif KERNEL_VERSION(4, 1, 0) <= LINUX_VERSION_CODE
+		caio->iocb->ki_complete(caio->iocb, res, res2);
+#else
+		aio_complete(caio->iocb, res, res2);
+#endif
 #endif
 		kfree(caio->qiocb);
 		free_caio = true;
@@ -436,6 +448,7 @@ static ssize_t cdev_aio_write(struct kiocb *iocb, const struct iovec *io,
 		pr_err("failed to allocate qiocb");
 		return -ENOMEM;
 	}
+
 	caio->reqv = (struct qdma_request **)(caio->qiocb + count);
 	for (i = 0; i < count; i++) {
 		caio->qiocb[i].private = caio;
@@ -452,6 +465,7 @@ static ssize_t cdev_aio_write(struct kiocb *iocb, const struct iovec *io,
 		caio->reqv[i]->dma_mapped = false;
 		caio->reqv[i]->udd_len = 0;
 		caio->reqv[i]->ep_addr = (u64)pos;
+		pos += io[i].iov_len;
 		caio->reqv[i]->no_memcpy = xcdev->no_memcpy ? 1 : 0;
 		caio->reqv[i]->count = io->iov_len;
 		caio->reqv[i]->timeout_ms = 10 * 1000;	/* 10 seconds */
@@ -509,6 +523,7 @@ static ssize_t cdev_aio_read(struct kiocb *iocb, const struct iovec *io,
 		pr_err("failed to allocate qiocb");
 		return -ENOMEM;
 	}
+
 	caio->reqv = (struct qdma_request **)(caio->qiocb + count);
 	for (i = 0; i < count; i++) {
 		caio->qiocb[i].private = caio;
@@ -525,6 +540,7 @@ static ssize_t cdev_aio_read(struct kiocb *iocb, const struct iovec *io,
 		caio->reqv[i]->dma_mapped = false;
 		caio->reqv[i]->udd_len = 0;
 		caio->reqv[i]->ep_addr = (u64)pos;
+		pos += io[i].iov_len;
 		caio->reqv[i]->no_memcpy = xcdev->no_memcpy ? 1 : 0;
 		caio->reqv[i]->count = io->iov_len;
 		caio->reqv[i]->timeout_ms = 10 * 1000;	/* 10 seconds */
